@@ -23,6 +23,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/Espeer5/protolog/internal/config"
+	"github.com/Espeer5/protolog/internal/memory"
 	"github.com/Espeer5/protolog/internal/storage"
 	"github.com/Espeer5/protolog/pkg/logproto/logging"
 )
@@ -32,11 +33,21 @@ import (
 *******************************************************************************/
 
 func main() {
-	addr := flag.String("addr", "tcp://localhost:5556", "ZMQ address of the log publisher")
-	dataDir := flag.String("data-dir", config.DefaultDataDir(), "directory to store per-topic log files")
+	addr := flag.String("addr", "tcp://localhost:5556",
+		"ZMQ address of the log publisher")
+
+	dataDir := flag.String("data-dir", config.DefaultDataDir(),
+		"directory to store per-topic log files")
+
+	bufferSize := flag.Int("buffer-size", config.DefaultBufferSize,
+		"number of recent log messages to keep in memory per topic")
+
 	flag.Parse()
 
 	log.Printf("Using data dir: %s", *dataDir)
+	log.Printf("Ring buffer size: %d", *bufferSize)
+
+	topicBuffers := memory.NewTopicBuffers(*bufferSize)
 
 	writer, err := storage.NewWriter(*dataDir)
 	if err != nil {
@@ -80,6 +91,9 @@ func main() {
 		if err := writer.WriteEnvelope(&env); err != nil {
 			log.Printf("failed to write envelope to storage: %v", err)
 		}
+
+		// Store in in-memory ring buffer for quick recent-access
+		topicBuffers.Add(&env)
 
 		t := time.Unix(0, 0)
 		if ts := env.GetTimestamp(); ts != nil {

@@ -24,14 +24,16 @@ type topicSpec struct {
 func main() {
 	rand.Seed(time.Now().UnixNano())
 
+	endpoint := "tcp://127.0.0.1:5556" // or make it a flag
+
 	pub, err := zmq4.NewSocket(zmq4.PUB)
 	if err != nil {
 		log.Fatalf("failed to create PUB socket: %v", err)
 	}
 	defer pub.Close()
 
-	if err := pub.Bind("tcp://*:5556"); err != nil {
-		log.Fatalf("failed to bind PUB socket: %v", err)
+	if err := pub.Connect(endpoint); err != nil {
+		log.Fatalf("failed to connect PUB socket: %v", err)
 	}
 
 	selfHost, _ := os.Hostname()

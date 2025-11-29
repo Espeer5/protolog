@@ -5,6 +5,13 @@ DESC_OUT := schema.desc
 
 PROTO_FILES := $(shell find $(PROTO_DIR) -name '*.proto')
 
+PY_PROTO_OUT_DIR := python/protolog_client/protos
+PROTO_SRC_DIR := proto
+
+PY_PROTO_FILES := \
+        proto/logging/log_envelope.proto \
+        proto/demo/demo_message.proto
+
 # Targets
 
 .PHONY: all proto clean
@@ -26,6 +33,14 @@ proto: $(PROTO_FILES)
 	@echo "Proto generation complete."
 	@echo " - Go output: $(GO_OUT_DIR)"
 	@echo " - Descriptor set: $(DESC_OUT)"
+
+py-proto:
+	@echo "Generating Python protobufs..."
+	@mkdir -p $(PY_PROTO_OUT_DIR)
+	protoc \
+		--proto_path=$(PROTO_SRC_DIR) \
+		--python_out=$(PY_PROTO_OUT_DIR) \
+		$(PY_PROTO_FILES)
 
 clean:
 	@echo "Cleaning generated files..."

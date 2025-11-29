@@ -273,8 +273,8 @@ func startHTTPServer(httpAddr string, buffers *memory.TopicBuffers, h *hub) {
 *******************************************************************************/
 
 func main() {
-	addr := flag.String("addr", "tcp://localhost:5556",
-		"ZMQ address of the log publisher")
+	addr := flag.String("addr", "tcp://*:5556",
+		"ZMQ address to bind SUB socket (publishers should connect here)")
 
 	dataDir := flag.String("data-dir", config.DefaultDataDir(),
 		"directory to store per-topic log files")
@@ -329,9 +329,9 @@ func main() {
 		log.Fatalf("failed to set SUBSCRIBE: %v", err)
 	}
 
-	log.Printf("Connecting SUB to %s ...", *addr)
-	if err := sub.Connect(*addr); err != nil {
-		log.Fatalf("failed to connect SUB socket: %v", err)
+	log.Printf("Binding SUB socket on %s ...", *addr)
+	if err := sub.Bind(*addr); err != nil {
+		log.Fatalf("failed to bind SUB socket: %v", err)
 	}
 	log.Printf("Connected. Waiting for log envelopes...")
 

@@ -1,3 +1,7 @@
+// The log-envelope message is the message the logging facility expects to RX 
+// from any participating application. It provides the metadata and encoded 
+// proto bytes for any logged proto message.
+
 syntax = "proto3";
 
 package logging;

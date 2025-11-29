@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package logging;
+
+option go_package = "todo";
+
+import "google/protobuf/timestamp.proto";
+
+// Severity level
+enum LogLevel {
+    LOG_LEVEL_UNSPECIFIED = 0;
+    LOG_LEVEL_DEBUG       = 1;
+    LOG_LEVEL_INFO        = 2;
+    LOG_LEVEL_WARN        = 3;
+    LOG_LEVEL_ERROR       = 4;
+    LOG_LEVEL_FATAL       = 5;
+}
+
+// Universal log envelope sent over ZMQ and stored in files.
+message LogEnvelope {
+    // Logical topic / stream name (e.g. "events", "metrics", "alerts").
+    string topic = 1;
+
+    // Time when the event occurred on the producing node.
+    google.protobuf.Timestamp timestamp = 2;
+
+    // Severity level.
+    LogLevel level = 3;
+
+    // Metadata about the source node.
+    string host = 4;        // hostname / machine ID
+    string service = 5;     // application or process name
+    int32 pid = 6;          // OS process ID
+
+    // Type of the message stored in 'payload'.
+    // Example: "my.pkg.Event" or "robot.telemetry.Position"
+    string type = 7;
+
+    // Binary protobuf-encoded original message.
+    bytes payload = 8;
+
+    // Optional text preview / summary for quick UI display.
+    string summary = 9;
+
+    // Optional session / correlation IDs for tracing across nodes.
+    string session_id = 10;
+    string correlation_id = 11;
+}

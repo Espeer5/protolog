@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package logging;
 
-option go_package = "todo";
+option go_package = "github.com/Espeer5/protolog/pkg/logproto/logging;logging";
 
 import "google/protobuf/timestamp.proto";
 

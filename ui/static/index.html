@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Protolog – Proof of Life</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 1rem;
+    }
+    #topics {
+      margin-bottom: 1rem;
+    }
+    #logs {
+      white-space: pre;
+      font-family: monospace;
+      border: 1px solid #ccc;
+      padding: 0.5rem;
+      max-height: 60vh;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>Protolog – Proof of Life</h1>
+
+  <div>
+    <label for="topicSelect">Topic:</label>
+    <select id="topicSelect"></select>
+    <button id="refreshTopics">Refresh Topics</button>
+  </div>
+
+  <div id="logs">Waiting for logs...</div>
+
+  <script>
+    const topicSelect = document.getElementById('topicSelect');
+    const logsDiv = document.getElementById('logs');
+    const refreshTopicsBtn = document.getElementById('refreshTopics');
+
+    let ws = null;
+
+    async function fetchTopics() {
+        const res = await fetch('/api/topics');
+        const data = await res.json();
+        const topics = data.topics || [];
+
+        topicSelect.innerHTML = '';
+        topics.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t;
+        opt.textContent = t;
+        topicSelect.appendChild(opt);
+        });
+
+        if (topics.length === 0) {
+        logsDiv.textContent = 'No topics yet. Is the publisher running?';
+        disconnectWS();
+        } else {
+        connectWS(); // connect to first topic
+        }
+    }
+
+    function disconnectWS() {
+        if (ws) {
+        ws.close();
+        ws = null;
+        }
+    }
+
+    function connectWS() {
+        const topic = topicSelect.value;
+        if (!topic) return;
+
+        disconnectWS();
+        logsDiv.textContent = '';
+
+        const wsUrl =
+        (location.protocol === 'https:' ? 'wss://' : 'ws://') +
+        location.host +
+        '/ws/logs?topic=' + encodeURIComponent(topic);
+
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+        logsDiv.textContent = `Connected to topic "${topic}"...\n`;
+        };
+
+        ws.onmessage = (event) => {
+        try {
+            const msg = JSON.parse(event.data);
+            const line =
+            `[${msg.timestamp}] [${msg.level}] ${msg.host}/${msg.service} (${msg.type})\n  ${msg.summary}`;
+            logsDiv.textContent += line + '\n\n';
+            logsDiv.scrollTop = logsDiv.scrollHeight;
+        } catch (e) {
+            console.error('bad message', e);
+        }
+        };
+
+        ws.onclose = () => {
+        // no-op for now
+        };
+
+        ws.onerror = (err) => {
+        console.error('WebSocket error', err);
+        };
+    }
+
+    topicSelect.addEventListener('change', connectWS);
+    refreshTopicsBtn.addEventListener('click', fetchTopics);
+
+    // initial load
+    fetchTopics();
+    </script>
+</body>
+</html>

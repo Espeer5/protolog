@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package demo;
+
+option go_package = "github.com/Espeer5/protolog/pkg/logproto/demo;demo";
+
+message Message {
+  string text  = 1;
+  int32  count = 2;
+}
+
+message Metric {
+  string name      = 1;
+  double value     = 2;
+  string unit      = 3;
+  string host      = 4;
+  string subsystem = 5;
+}
+
+message Alert {
+  string id          = 1;
+  string severity    = 2;
+  string description = 3;
+  string source      = 4;
+  int64  incident_id = 5;
+}
+
+message AuditEvent {
+  string actor    = 1;
+  string action   = 2;
+  string resource = 3;
+  int64  success  = 4;
+  string details  = 5;
+}

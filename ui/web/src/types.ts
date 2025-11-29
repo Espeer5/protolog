@@ -6,6 +6,7 @@ export interface LogDTO {
   service: string
   summary: string
   type: string
+  payloadJson?: any
 }
 
 export interface TopicsResponse {

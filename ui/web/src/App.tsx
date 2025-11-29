@@ -1,83 +1,133 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { LogDTO, TopicsResponse } from './types'
+import { formatTimestamp } from './utils/time'
 import './App.css'
 
 type StatusState =
   | { kind: 'disconnected' }
-  | { kind: 'connecting'; topic: string | null }
-  | { kind: 'connected'; topic: string | null }
+  | { kind: 'connecting' }
+  | { kind: 'connected' }
   | { kind: 'error'; message: string }
 
 function App() {
-  const [topics, setTopics] = useState<string[]>([])
-  const [activeTopic, setActiveTopic] = useState<string | null>(null)
+  // Raw data
   const [logs, setLogs] = useState<LogDTO[]>([])
-  const [status, setStatus] = useState<StatusState>({ kind: 'disconnected' })
+  const [knownTopics, setKnownTopics] = useState<string[]>([])
 
+  // Selection / filters
+  const [selectedLog, setSelectedLog] = useState<LogDTO | null>(null)
+  const [topicFilter, setTopicFilter] = useState<string[]>([])
+  const [hostFilter, setHostFilter] = useState<string[]>([])
+  const [levelFilter, setLevelFilter] = useState<string[]>([])
+  const [typeFilter, setTypeFilter] = useState<string[]>([])
+
+  // UI state
+  const [status, setStatus] = useState<StatusState>({ kind: 'disconnected' })
+  const [paused, setPaused] = useState(false)
+  const [hasNewLogs, setHasNewLogs] = useState(false)
+
+  // Refs
   const wsRef = useRef<WebSocket | null>(null)
   const logsRef = useRef<HTMLDivElement | null>(null)
+  const pausedRef = useRef(false)
+  const autoScrollRef = useRef(true)
 
-  // Fetch topics once on mount, and when user clicks "Refresh"
+  // --- Helpers for filters ---
+
+  const allTopicsFromLogs = Array.from(
+    new Set(logs.map((l) => l.topic).filter(Boolean)),
+  ).sort()
+
+  const topicOptions = Array.from(
+    new Set([...(knownTopics || []), ...allTopicsFromLogs]),
+  )
+    .filter(Boolean)
+    .sort()
+
+  const hostOptions = Array.from(
+    new Set(logs.map((l) => l.host).filter(Boolean)),
+  ).sort()
+
+  const levelOptions = Array.from(
+    new Set(logs.map((l) => l.level).filter(Boolean)),
+  ).sort()
+
+  const typeOptions = Array.from(
+    new Set(logs.map((l) => l.type).filter(Boolean)),
+  ).sort()
+
+  function toggleValue(
+    value: string,
+    current: string[],
+    setter: (v: string[]) => void,
+  ) {
+    setter(
+      current.includes(value)
+        ? current.filter((v) => v !== value)
+        : [...current, value],
+    )
+  }
+
+  function passesFilters(log: LogDTO): boolean {
+    if (topicFilter.length && !topicFilter.includes(log.topic)) return false
+    if (hostFilter.length && !hostFilter.includes(log.host)) return false
+    if (levelFilter.length && !levelFilter.includes(log.level)) return false
+    if (typeFilter.length && !typeFilter.includes(log.type)) return false
+    return true
+  }
+
+  const filteredLogs = logs.filter(passesFilters)
+
+  // If the selected log is no longer visible due to filters, clear selection
+  useEffect(() => {
+    if (selectedLog && !passesFilters(selectedLog)) {
+      setSelectedLog(null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topicFilter, hostFilter, levelFilter, typeFilter])
+
+  // --- Fetch topics from API (for initial topic list) ---
+
   async function fetchTopics() {
     try {
       const res = await fetch('/api/topics')
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`)
-      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = (await res.json()) as TopicsResponse
       const t = data.topics ?? []
-      setTopics(t)
-
-      if (!t.length) {
-        setActiveTopic(null)
-        setLogs([])
-        setStatus({ kind: 'disconnected' })
-        return
-      }
-
-      // If we have no active topic or it disappeared, pick the first
-      setActiveTopic((prev) => (prev && t.includes(prev) ? prev : t[0]))
+      setKnownTopics(t)
     } catch (err: any) {
       console.error('Failed to fetch topics:', err)
       setStatus({ kind: 'error', message: 'Failed to fetch topics' })
     }
   }
 
-  // WebSocket connection logic when activeTopic changes
+  // --- WebSocket connection: subscribe to ALL topics (no filter) ---
+
   useEffect(() => {
-    const topic = activeTopic
-    if (!topic) {
-      // no topic selected / available
-      if (wsRef.current) {
-        wsRef.current.close()
-        wsRef.current = null
-      }
-      return
-    }
-
-    // Close previous WS if any
-    if (wsRef.current) {
-      wsRef.current.close()
-      wsRef.current = null
-    }
-
-    setLogs([])
-    setStatus({ kind: 'connecting', topic })
+    setStatus({ kind: 'connecting' })
 
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const base = `${proto}//${window.location.host}`
-    const url = `${base}/ws/logs?topic=${encodeURIComponent(topic)}`
+    const url = `${base}/ws/logs` // no topic param -> all topics
 
     const ws = new WebSocket(url)
     wsRef.current = ws
 
     ws.onopen = () => {
-      setStatus({ kind: 'connected', topic })
+      setStatus({ kind: 'connected' })
     }
 
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data) as LogDTO
+
+        // If paused, ignore incoming messages
+        if (pausedRef.current) return
+
+        if (!autoScrollRef.current) {
+          setHasNewLogs(true)
+        }
+
         setLogs((prev) => [...prev, msg])
       } catch (e) {
         console.error('Bad WS message:', e)
@@ -90,7 +140,6 @@ function App() {
     }
 
     ws.onclose = () => {
-      // Only mark disconnected if this is the current WS
       if (wsRef.current === ws) {
         wsRef.current = null
         setStatus({ kind: 'disconnected' })
@@ -98,41 +147,83 @@ function App() {
     }
 
     return () => {
-      // Cleanup when topic changes / component unmounts
       if (wsRef.current === ws) {
         ws.close()
         wsRef.current = null
       }
     }
-  }, [activeTopic])
+  }, [])
 
-  // Auto-scroll logs to bottom when new logs arrive
+  // --- Auto-scroll when filtered logs change, unless paused or user scrolled up ---
+
   useEffect(() => {
-    if (logsRef.current) {
+    if (!paused && autoScrollRef.current && logsRef.current) {
       logsRef.current.scrollTop = logsRef.current.scrollHeight
     }
-  }, [logs])
+  }, [filteredLogs, paused])
 
+  // Initial topics load
   useEffect(() => {
     fetchTopics()
   }, [])
+
+  // --- Controls ---
+
+  function togglePaused() {
+    setPaused((prev) => {
+      const next = !prev
+      pausedRef.current = next
+      return next
+    })
+  }
+
+  function clearScreen() {
+    setLogs([])
+    setSelectedLog(null)
+    setHasNewLogs(false)
+  }
+
+  function jumpToBottom() {
+    const el = logsRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+    autoScrollRef.current = true
+    setHasNewLogs(false)
+  }
+
+  function onLogsScroll() {
+    const el = logsRef.current
+    if (!el) return
+
+    // How far are we from the bottom?
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+
+    // Treat user as "at bottom" if we're within 1px
+    const atBottom = Math.abs(distanceFromBottom) < 1
+
+    const wasAuto = autoScrollRef.current
+    autoScrollRef.current = atBottom
+
+    // If user just came back to bottom, clear "new logs" pill
+    if (!wasAuto && atBottom) {
+      setHasNewLogs(false)
+    }
+  }
 
   function statusText() {
     switch (status.kind) {
       case 'disconnected':
         return 'Disconnected'
       case 'connecting':
-        return status.topic ? `Connecting (${status.topic})...` : 'Connecting...'
+        return 'Connecting...'
       case 'connected':
-        return status.topic ? `Connected (${status.topic})` : 'Connected'
+        return 'Connected'
       case 'error':
         return `Error: ${status.message}`
       default:
         return ''
     }
   }
-
-  const currentTopicLabel = activeTopic ?? '(none)'
 
   return (
     <div className="app-root">
@@ -152,50 +243,231 @@ function App() {
       <main>
         <aside>
           <div className="aside-header">
-            <h2>Topics</h2>
+            <h2>Filters</h2>
             <button onClick={fetchTopics}>Refresh</button>
           </div>
-          <ul id="topicsList">
-            {topics.map((t) => (
-              <li
-                key={t || '(untitled)'}
-                className={t === activeTopic ? 'active' : ''}
-                onClick={() => setActiveTopic(t)}
-              >
-                <span className="topic">{t || '(untitled)'}</span>
-              </li>
-            ))}
-            {!topics.length && (
-              <li className="empty">No topics yet. Is the publisher running?</li>
-            )}
-          </ul>
+
+          <div className="filter-section">
+            <div className="filter-title">Topics</div>
+            <ul className="filter-list">
+              {topicOptions.map((t) => (
+                <li key={t}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={topicFilter.includes(t)}
+                      onChange={() =>
+                        toggleValue(t, topicFilter, setTopicFilter)
+                      }
+                    />
+                    <span className="filter-label-text">{t}</span>
+                  </label>
+                </li>
+              ))}
+              {topicOptions.length === 0 && (
+                <li className="empty">No topics yet</li>
+              )}
+            </ul>
+          </div>
+
+          <div className="filter-section">
+            <div className="filter-title">Hosts</div>
+            <ul className="filter-list">
+              {hostOptions.map((h) => (
+                <li key={h}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={hostFilter.includes(h)}
+                      onChange={() =>
+                        toggleValue(h, hostFilter, setHostFilter)
+                      }
+                    />
+                    <span className="filter-label-text">{h}</span>
+                  </label>
+                </li>
+              ))}
+              {hostOptions.length === 0 && (
+                <li className="empty">No hosts yet</li>
+              )}
+            </ul>
+          </div>
+
+          <div className="filter-section">
+            <div className="filter-title">Levels</div>
+            <ul className="filter-list">
+              {levelOptions.map((lvl) => (
+                <li key={lvl}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={levelFilter.includes(lvl)}
+                      onChange={() =>
+                        toggleValue(lvl, levelFilter, setLevelFilter)
+                      }
+                    />
+                    <span className="filter-label-text">{lvl}</span>
+                  </label>
+                </li>
+              ))}
+              {levelOptions.length === 0 && (
+                <li className="empty">No levels yet</li>
+              )}
+            </ul>
+          </div>
+
+          <div className="filter-section">
+            <div className="filter-title">Types</div>
+            <ul className="filter-list">
+              {typeOptions.map((ty) => (
+                <li key={ty}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={typeFilter.includes(ty)}
+                      onChange={() =>
+                        toggleValue(ty, typeFilter, setTypeFilter)
+                      }
+                    />
+                    <span className="filter-label-text">{ty}</span>
+                  </label>
+                </li>
+              ))}
+              {typeOptions.length === 0 && (
+                <li className="empty">No types yet</li>
+              )}
+            </ul>
+          </div>
         </aside>
 
-        <section>
+        <section className="logs-and-detail">
           <div className="toolbar">
-            <span className="label">Topic:</span>
-            <span id="currentTopic">{currentTopicLabel}</span>
+            <div className="toolbar-left">
+              <span className="label">Logs</span>
+            </div>
+            <div className="toolbar-right">
+              <button onClick={togglePaused}>
+                {paused ? 'Resume' : 'Pause'}
+              </button>
+              <button onClick={jumpToBottom}>Bottom</button>
+              <button onClick={clearScreen}>Clear screen</button>
+            </div>
           </div>
-          <div id="logs" ref={logsRef}>
-            {logs.length === 0 ? (
-              <span className="placeholder">Waiting for logs...</span>
-            ) : (
-              logs.map((l, idx) => (
-                <div key={idx} className="log-line">
-                  <div className="log-meta">
-                    <span className="ts">{l.timestamp}</span>{' '}
-                    <span className={`level level-${l.level.toLowerCase()}`}>
-                      {l.level}
-                    </span>{' '}
-                    <span className="host-service">
-                      {l.host}/{l.service}
-                    </span>{' '}
-                    <span className="type">({l.type})</span>
+
+          <div className="logs-layout">
+            <div className="logs-container">
+              <div
+                id="logs"
+                ref={logsRef}
+                className="logs-list"
+                onScroll={onLogsScroll}
+              >
+                {filteredLogs.length === 0 ? (
+                  <span className="placeholder">No logs (check filters?)</span>
+                ) : (
+                  <div className="log-table">
+                    <div className="log-header-row">
+                      <div className="log-col log-col-ts">Time</div>
+                      <div className="log-col log-col-level">Level</div>
+                      <div className="log-col log-col-topic">Topic</div>
+                      <div className="log-col log-col-host">Host / Service</div>
+                      <div className="log-col log-col-type">Type</div>
+                      <div className="log-col log-col-summary">Summary</div>
+                    </div>
+
+                    {filteredLogs.map((l, idx) => (
+                      <div
+                        key={idx}
+                        className={
+                          'log-row' +
+                          (selectedLog === l ? ' log-row-selected' : '')
+                        }
+                        onClick={() => setSelectedLog(l)}
+                      >
+                        <div className="log-col log-col-ts">
+                          {formatTimestamp(l.timestamp)}
+                        </div>
+                        <div className="log-col log-col-level">
+                          <span
+                            className={`level-badge level-${l.level.toLowerCase()}`}
+                          >
+                            {l.level.replace('LOG_LEVEL_', '')}
+                          </span>
+                        </div>
+                        <div className="log-col log-col-topic">
+                          {l.topic}
+                        </div>
+                        <div className="log-col log-col-host">
+                          {l.host}/{l.service}
+                        </div>
+                        <div className="log-col log-col-type">
+                          {l.type}
+                        </div>
+                        <div className="log-col log-col-summary">
+                          {l.summary}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <div className="log-summary">{l.summary}</div>
+                )}
+              </div>
+
+              {hasNewLogs && !paused && (
+                <button
+                  className="new-logs-indicator"
+                  onClick={jumpToBottom}
+                >
+                  New logs ↓
+                </button>
+              )}
+            </div>
+
+            <div className="detail-panel">
+              <div className="detail-header">Details</div>
+              {selectedLog ? (
+                <div className="detail-body">
+                  <div className="detail-row">
+                    <span className="detail-label">Timestamp</span>
+                    <span className="detail-value">
+                      {formatTimestamp(selectedLog.timestamp)}
+                    </span>
+                  </div>
+                  <div className="detail-row">
+                    <span className="detail-label">Level</span>
+                    <span className="detail-value">{selectedLog.level}</span>
+                  </div>
+                  <div className="detail-row">
+                    <span className="detail-label">Host / Service</span>
+                    <span className="detail-value">
+                      {selectedLog.host}/{selectedLog.service}
+                    </span>
+                  </div>
+                  <div className="detail-row">
+                    <span className="detail-label">Type</span>
+                    <span className="detail-value">
+                      {selectedLog.type}
+                    </span>
+                  </div>
+                  <div className="detail-row">
+                    <span className="detail-label">Summary</span>
+                    <span className="detail-value">
+                      {selectedLog.summary}
+                    </span>
+                  </div>
+
+                  <div className="detail-payload-label">Payload</div>
+                  <pre className="detail-payload">
+                    {selectedLog.payloadJson
+                      ? JSON.stringify(selectedLog.payloadJson, null, 2)
+                      : '// no payload or unknown type'}
+                  </pre>
                 </div>
-              ))
-            )}
+              ) : (
+                <div className="detail-body placeholder">
+                  Click a log entry to see details
+                </div>
+              )}
+            </div>
           </div>
         </section>
       </main>

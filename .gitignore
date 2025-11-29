@@ -1,2 +1,4 @@
 **/*.pb.go
 bin/*
+**/*.desc
+ui/static/*

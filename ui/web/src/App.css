@@ -54,15 +54,17 @@ main {
   flex: 1;
   display: flex;
   min-height: 0;
+  min-width: 0;
 }
 
 aside {
-  width: 220px;
+  width: 260px;
   border-right: 1px solid var(--border);
   padding: 0.75rem;
   background: var(--bg-alt);
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 
 .aside-header {
@@ -130,7 +132,7 @@ button:hover {
   cursor: default;
 }
 
-section {
+.logs-and-detail {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -141,16 +143,22 @@ section {
 .toolbar {
   display: flex;
   align-items: center;
+  justify-content: space-between; /* added */
   gap: 0.5rem;
   margin-bottom: 0.5rem;
   font-size: 0.85rem;
   color: var(--muted);
 }
 
-.toolbar .label {
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-size: 0.75rem;
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.toolbar-right {
+  display: flex;
+  gap: 0.25rem;
 }
 
 #currentTopic {
@@ -158,21 +166,172 @@ section {
   color: var(--text);
 }
 
-#logs {
+.logs-layout {
+  flex: 1;
+  display: flex;
+  gap: 0.75rem;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* wrap logs list + floating indicator */
+.logs-container {
+  position: relative;
+  flex: 2;
+  display: flex;
+  min-width: 0;
+}
+
+.logs-list {
   flex: 1;
   background: var(--log-bg);
   border-radius: 6px;
   border: 1px solid var(--border);
-  padding: 0.5rem;
+  padding: 0 0.5rem 0.25rem 0.5rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Consolas',
     'Liberation Mono', 'Courier New', monospace;
   font-size: 0.8rem;
   overflow-y: auto;
-  white-space: pre-wrap;
+  overflow-x: hidden;
+  white-space: normal; /* table layout, not pre-wrap */
+  min-width: 0;
+}
+
+.log-table {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Header row */
+.log-header-row {
+  display: grid;
+  grid-template-columns:
+    minmax(140px, 2fr)  /* time */
+    minmax(70px, 1fr)   /* level */
+    minmax(90px, 1fr)   /* topic */
+    minmax(140px, 2fr)  /* host/service */
+    minmax(140px, 2fr)  /* type */
+    minmax(160px, 3fr); /* summary */
+  column-gap: 0.5rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: #181818;
+  z-index: 1;
+}
+
+.log-header-row .log-col {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+/* Data rows */
+.log-row {
+  display: grid;
+  grid-template-columns:
+    minmax(140px, 2fr)
+    minmax(70px, 1fr)
+    minmax(90px, 1fr)
+    minmax(140px, 2fr)
+    minmax(140px, 2fr)
+    minmax(160px, 3fr);
+  column-gap: 0.5rem;
+  align-items: center;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+}
+
+.log-row:nth-child(2n + 1) {
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.log-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.log-row-selected {
+  background: rgba(77, 171, 247, 0.2);
+}
+
+/* Columns */
+.log-col {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-col-summary {
+  white-space: nowrap;
+}
+
+/* Level colors as badges */
+.level-badge {
+  display: inline-block;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: #333;
+  color: #eee;
+}
+
+.level-log_level_info,
+.level-info {
+  background: rgba(77, 171, 247, 0.2);
+  color: #4dabf7;
+}
+
+.level-log_level_debug,
+.level-debug {
+  background: rgba(173, 181, 189, 0.2);
+  color: #adb5bd;
+}
+
+.level-log_level_warn,
+.level-warn {
+  background: rgba(252, 196, 25, 0.2);
+  color: #fcc419;
+}
+
+.level-log_level_error,
+.level-error {
+  background: rgba(255, 107, 107, 0.2);
+  color: #ff6b6b;
+}
+
+/* floating "New logs" pill */
+.new-logs-indicator {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  background: rgba(77, 171, 247, 0.95);
+  border: none;
+  color: #000;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.5);
 }
 
 .log-line {
   margin-bottom: 0.5rem;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0.25rem 0.25rem;
+}
+
+.log-line:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.log-line-selected {
+  background: rgba(77, 171, 247, 0.2);
 }
 
 .log-meta {
@@ -216,5 +375,103 @@ section {
 }
 
 .placeholder {
+  color: var(--muted);
+}
+
+.detail-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-alt);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  min-width: 0;
+}
+
+.detail-header {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.8rem;
+  border-bottom: 1px solid var(--border);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.detail-body {
+  flex: 1;
+  padding: 0.5rem;
+  overflow: auto;
+  font-size: 0.8rem;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.detail-label {
+  color: var(--muted);
+  min-width: 110px;
+}
+
+.detail-value {
+  color: var(--text);
+  text-align: right;
+}
+
+.detail-payload-label {
+  margin-top: 0.5rem;
+  margin-bottom: 0.25rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.detail-payload {
+  margin: 0;
+  background: #111;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  padding: 0.4rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Consolas',
+    'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.75rem;
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.filter-section {
+  margin-top: 0.75rem;
+}
+
+.filter-title {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.filter-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.8rem;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.filter-list li {
+  margin-bottom: 0.15rem;
+}
+
+.filter-label-text {
+  margin-left: 0.25rem;
+}
+
+.filter-list li.empty {
   color: var(--muted);
 }

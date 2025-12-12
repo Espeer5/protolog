@@ -1,4 +1,6 @@
 **/*.pb.go
+**/*.pb2.py
 bin/*
 **/*.desc
 ui/static/*
+**/__pycache__/*

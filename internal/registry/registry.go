@@ -8,13 +8,11 @@
 
 package registry
 
-/*******************************************************************************
-*  IMPORTS
-*******************************************************************************/
-
 import (
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -37,24 +35,72 @@ type Registry struct {
 *  FUNCTIONS
 *******************************************************************************/
 
-// NewFromFile loads a FileDescriptorSet from the given path
+// NewFromFile loads a single FileDescriptorSet from the given path.
+// (Kept for backwards compatibility.)
 func NewFromFile(path string) (*Registry, error) {
-	data, err := os.ReadFile(path)
+	return NewFromFiles([]string{path})
+}
+
+// NewFromFiles loads and merges multiple FileDescriptorSet files into one registry.
+func NewFromFiles(paths []string) (*Registry, error) {
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("no descriptor paths provided")
+	}
+
+	reg := &protoregistry.Files{}
+
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read descriptor set %q: %w", path, err)
+		}
+
+		var fds descriptorpb.FileDescriptorSet
+		if err := proto.Unmarshal(data, &fds); err != nil {
+			return nil, fmt.Errorf("unmarshal descriptor set %q: %w", path, err)
+		}
+
+		for _, fdProto := range fds.File {
+			fd, err := protodesc.NewFile(fdProto, reg)
+			if err != nil {
+				return nil, fmt.Errorf("protodesc.NewFile(%s): %w", fdProto.GetName(), err)
+			}
+			if err := reg.RegisterFile(fd); err != nil {
+				// It is usually safe to ignore "already registered" errors if you expect overlaps,
+				// but here we fail loudly to surface configuration issues.
+				return nil, fmt.Errorf("register file %s: %w", fd.Path(), err)
+			}
+		}
+	}
+
+	return &Registry{files: reg}, nil
+}
+
+// NewFromDir loads all *.desc files in the given directory into a single registry.
+func NewFromDir(dir string) (*Registry, error) {
+	var paths []string
+
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if filepath.Ext(path) == ".desc" {
+			paths = append(paths, path)
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("read descriptor set: %w", err)
+		return nil, fmt.Errorf("walk dir %q: %w", dir, err)
 	}
 
-	var fds descriptorpb.FileDescriptorSet
-	if err := proto.Unmarshal(data, &fds); err != nil {
-		return nil, fmt.Errorf("unmarshal descriptor set: %w", err)
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("no .desc files found in %q", dir)
 	}
 
-	files, err := protodesc.NewFiles(&fds)
-	if err != nil {
-		return nil, fmt.Errorf("build files registry: %w", err)
-	}
-
-	return &Registry{files: files}, nil
+	return NewFromFiles(paths)
 }
 
 // FormatJSON parses the given payload as the given full type name and returns JSON bytes.

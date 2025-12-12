@@ -1,5 +1,5 @@
 **/*.pb.go
-**/*.pb2.py
+**/*_pb2.py
 bin/*
 **/*.desc
 ui/static/*

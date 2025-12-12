@@ -1,7 +1,7 @@
 from typing import Optional, Union
 
 from .client import ProtologClient, LogLevelLike
-from .protos import log_envelope_pb2  # re-export if handy
+from .protos.logging import log_envelope_pb2
 
 __all__ = [
     "ProtologClient",

@@ -8,7 +8,7 @@ from google.protobuf.message import Message
 from google.protobuf.timestamp_pb2 import Timestamp
 
 # Adjust import path if you use a different package layout
-from .protos import log_envelope_pb2
+from .protos.logging import log_envelope_pb2
 
 
 LogLevelLike = Union[

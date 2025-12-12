@@ -276,10 +276,12 @@ func main() {
 	addr := flag.String("addr", "tcp://*:5556",
 		"ZMQ address to bind SUB socket (publishers should connect here)")
 
+	cfg := config.DefaultConfig()
+
 	dataDir := flag.String("data-dir", config.DefaultDataDir(),
 		"directory to store per-topic log files")
 
-	bufferSize := flag.Int("buffer-size", config.DefaultBufferSize,
+	bufferSize := flag.Int("buffer-size", cfg.BufferSize,
 		"number of recent log messages to keep in memory per topic")
 
 	httpAddr := flag.String("http-addr", ":8080",
@@ -293,13 +295,13 @@ func main() {
 
 	topicBuffers := memory.NewTopicBuffers(*bufferSize)
 
-	// Schema registry (optional)
-	reg, err := registry.NewFromFile("schema.desc")
+	// Schema registry
+	reg, err := registry.NewFromFiles(cfg.DescriptorSets)
 	if err != nil {
-		log.Printf("schema registry disabled (could not load schema.desc): %v", err)
+		log.Printf("schema registry disabled (could not load descriptor): %v", err)
 		reg = nil
 	} else {
-		log.Printf("Loaded schema registry from schema.desc")
+		log.Printf("Loaded schema registry")
 	}
 
 	// WebSocket hub

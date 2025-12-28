@@ -47,7 +47,7 @@ func NewFromFiles(paths []string) (*Registry, error) {
 		return nil, fmt.Errorf("no descriptor paths provided")
 	}
 
-	reg := &protoregistry.Files{}
+	var combined descriptorpb.FileDescriptorSet
 
 	for _, path := range paths {
 		data, err := os.ReadFile(path)
@@ -60,20 +60,15 @@ func NewFromFiles(paths []string) (*Registry, error) {
 			return nil, fmt.Errorf("unmarshal descriptor set %q: %w", path, err)
 		}
 
-		for _, fdProto := range fds.File {
-			fd, err := protodesc.NewFile(fdProto, reg)
-			if err != nil {
-				return nil, fmt.Errorf("protodesc.NewFile(%s): %w", fdProto.GetName(), err)
-			}
-			if err := reg.RegisterFile(fd); err != nil {
-				// It is usually safe to ignore "already registered" errors if you expect overlaps,
-				// but here we fail loudly to surface configuration issues.
-				return nil, fmt.Errorf("register file %s: %w", fd.Path(), err)
-			}
-		}
+		combined.File = append(combined.File, fds.File...)
 	}
 
-	return &Registry{files: reg}, nil
+	files, err := protodesc.NewFiles(&combined)
+	if err != nil {
+		return nil, fmt.Errorf("build files registry: %w", err)
+	}
+
+	return &Registry{files: files}, nil
 }
 
 // NewFromDir loads all *.desc files in the given directory into a single registry.

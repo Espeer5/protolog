@@ -164,10 +164,13 @@ class ProtologClient:
             # payload handling
             if isinstance(payload, Message):
                 # dynamic proto; infer full name
-                env.type = type_name or payload.DESCRIPTOR.full_name
+                if type_name is not None:
+                    env.type = type_name
+                else:
+                    env.type = payload.DESCRIPTOR.full_name
                 env.payload = payload.SerializeToString()
             elif isinstance(payload, (bytes, bytearray, memoryview)):
-                if not type_name:
+                if type_name is None:
                     raise ValueError(
                         "type_name is required when payload is bytes; "
                         "otherwise pass a protobuf Message."

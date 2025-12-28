@@ -257,7 +257,7 @@ func startHTTPServer(httpAddr string, buffers *memory.TopicBuffers, h *hub) {
 	})
 
 	// Static files (GUI) from ./ui/static
-	fs := http.FileServer(http.Dir("ui/static"))
+	fs := http.FileServer(http.Dir("protolog/ui/static"))
 	mux.Handle("/", fs)
 
 	go func() {

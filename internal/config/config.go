@@ -20,7 +20,7 @@ const DefaultBufferSize = 1000
 func DefaultConfig() *Config {
 	return &Config{
 		BufferSize:     DefaultBufferSize,
-		DescriptorSets: []string{"protolog/schema.desc", "/home/ec2-user/sandbox/nimbus/nimbus.desc", "/home/ec2-user/sandbox/nimbus/ascend_core/asend_core.desc"},
+		DescriptorSets: []string{"/home/ec2-user/sandbox/nimbus/protolog/schema.desc", "/home/ec2-user/sandbox/nimbus/ascend_core/ascend_core.desc", "/home/ec2-user/sandbox/nimbus/nimbus.desc"},
 	}
 }
 

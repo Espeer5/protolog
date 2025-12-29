@@ -12,3 +12,8 @@ export interface LogDTO {
 export interface TopicsResponse {
   topics: string[]
 }
+
+export type LogsQueryResponse = {
+  items: LogDTO[]
+  next_cursor?: string
+}

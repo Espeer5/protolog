@@ -4,3 +4,4 @@ bin/*
 **/*.desc
 ui/static/*
 **/__pycache__/*
+data/*

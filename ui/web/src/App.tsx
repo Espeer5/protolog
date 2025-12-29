@@ -9,10 +9,13 @@ type StatusState =
   | { kind: 'connected' }
   | { kind: 'error'; message: string }
 
+type Mode = 'live' | 'history'
+
 function App() {
   // Raw data
   const [logs, setLogs] = useState<LogDTO[]>([])
   const [knownTopics, setKnownTopics] = useState<string[]>([])
+  const MAX_LIVE_LOGS = 5000
 
   // Selection / filters
   const [selectedLog, setSelectedLog] = useState<LogDTO | null>(null)
@@ -22,6 +25,21 @@ function App() {
   const [typeFilter, setTypeFilter] = useState<string[]>([])
 
   // UI state
+  const [mode, setMode] = useState<Mode>('live')
+  const [startTime, setStartTime] = useState<string>(() => {
+    // default: last 15 minutes
+    const d = new Date(Date.now() - 15 * 60 * 1000)
+    return d.toISOString().slice(0, 19) // "YYYY-MM-DDTHH:MM:SS" for datetime-local
+  })
+  const [endTime, setEndTime] = useState<string>(() => {
+    const d = new Date()
+    return d.toISOString().slice(0, 19)
+  })
+  const [historyCursor, setHistoryCursor] = useState<string>('')
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyHasMore, setHistoryHasMore] = useState(false)
+
+
   const [status, setStatus] = useState<StatusState>({ kind: 'disconnected' })
   const [paused, setPaused] = useState(false)
   const [hasNewLogs, setHasNewLogs] = useState(false)
@@ -31,6 +49,7 @@ function App() {
   const logsRef = useRef<HTMLDivElement | null>(null)
   const pausedRef = useRef(false)
   const autoScrollRef = useRef(true)
+  const modeRef = useRef<Mode>('live')
 
   // --- Helpers for filters ---
 
@@ -68,11 +87,18 @@ function App() {
     )
   }
 
+  const [serviceFilter, setServiceFilter] = useState<string[]>([])
+
+  const serviceOptions = Array.from(
+    new Set(logs.map((l) => l.service).filter(Boolean)),
+  ).sort()
+
   function passesFilters(log: LogDTO): boolean {
     if (topicFilter.length && !topicFilter.includes(log.topic)) return false
     if (hostFilter.length && !hostFilter.includes(log.host)) return false
     if (levelFilter.length && !levelFilter.includes(log.level)) return false
     if (typeFilter.length && !typeFilter.includes(log.type)) return false
+    if (serviceFilter.length && !serviceFilter.includes(log.service)) return false
     return true
   }
 
@@ -84,7 +110,57 @@ function App() {
       setSelectedLog(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [topicFilter, hostFilter, levelFilter, typeFilter])
+  }, [topicFilter, hostFilter, levelFilter, typeFilter, serviceFilter])
+
+  useEffect(() => {
+    if (mode === 'history') {
+      setLogs([])
+      setHistoryCursor('')
+      setSelectedLog(null)
+      fetchHistoryPage(true)
+    }
+  }, [mode])
+
+  // --- Fetch historical logs from the API ---
+  async function fetchHistoryPage(reset: boolean) {
+    if (historyLoading) return
+    setHistoryLoading(true)
+    try {
+      const startIso = new Date(startTime).toISOString()
+      const endIso = new Date(endTime).toISOString()
+
+      const params = new URLSearchParams()
+      params.set('start', startIso)
+      params.set('end', endIso)
+      topicFilter.forEach(t => params.append('topic', t))
+      serviceFilter.forEach(s => params.append('service', s))
+      hostFilter.forEach(h => params.append('host', h))
+      typeFilter.forEach(t => params.append('type', t))
+      levelFilter.forEach(l => params.append('level', l))
+
+      params.set('limit', '500')
+      if (!reset && historyCursor) params.set('cursor', historyCursor)
+
+      const res = await fetch(`/api/logs?${params.toString()}`)
+      if (!res.ok) {
+        const body = await res.text().catch(() => '')
+        throw new Error(`HTTP ${res.status} ${res.statusText}: ${body}`)
+      }
+      const data = (await res.json()) as { items: LogDTO[]; next_cursor?: string }
+
+      setHistoryCursor(data.next_cursor ?? '')
+      setHistoryHasMore(Boolean(data.next_cursor))
+
+      setLogs((prev) => (reset ? data.items : [...prev, ...data.items]))
+      setSelectedLog(null)
+      setHasNewLogs(false)
+    } catch (err) {
+      console.error('History query failed:', err)
+      setStatus({ kind: 'error', message: 'History query failed' })
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
 
   // --- Fetch topics from API (for initial topic list) ---
 
@@ -122,13 +198,17 @@ function App() {
         const msg = JSON.parse(event.data) as LogDTO
 
         // If paused, ignore incoming messages
-        if (pausedRef.current) return
+        if (pausedRef.current || modeRef.current === 'history') return
 
         if (!autoScrollRef.current) {
           setHasNewLogs(true)
         }
 
-        setLogs((prev) => [...prev, msg])
+        setLogs((prev) => {
+          const next = [...prev, msg]
+          if (next.length <= MAX_LIVE_LOGS) return next
+          return next.slice(next.length - MAX_LIVE_LOGS)
+        })
       } catch (e) {
         console.error('Bad WS message:', e)
       }
@@ -294,6 +374,27 @@ function App() {
           </div>
 
           <div className="filter-section">
+            <div className="filter-title">Services</div>
+            <ul className="filter-list">
+              {serviceOptions.map((s) => (
+                <li key={s}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={serviceFilter.includes(s)}
+                      onChange={() => toggleValue(s, serviceFilter, setServiceFilter)}
+                    />
+                    <span className="filter-label-text">{s}</span>
+                  </label>
+                </li>
+              ))}
+              {serviceOptions.length === 0 && (
+                <li className="empty">No services yet</li>
+              )}
+            </ul>
+          </div>
+
+          <div className="filter-section">
             <div className="filter-title">Levels</div>
             <ul className="filter-list">
               {levelOptions.map((lvl) => (
@@ -351,6 +452,38 @@ function App() {
               </button>
               <button onClick={jumpToBottom}>Bottom</button>
               <button onClick={clearScreen}>Clear screen</button>
+              <button onClick={() => setMode(mode === 'live' ? 'history' : 'live')}>
+                {mode === 'live' ? 'History' : 'Live'}
+              </button>
+              {mode === 'history' && (
+                <div className="history-controls">
+                  <label>
+                    Start
+                    <input
+                      type="datetime-local"
+                      value={startTime}
+                      onChange={(e) => setStartTime(e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    End
+                    <input
+                      type="datetime-local"
+                      value={endTime}
+                      onChange={(e) => setEndTime(e.target.value)}
+                    />
+                  </label>
+                  <button onClick={() => { setHistoryCursor(''); fetchHistoryPage(true) }}>
+                    Run
+                  </button>
+                  <button
+                    disabled={!historyHasMore || historyLoading}
+                    onClick={() => fetchHistoryPage(false)}
+                  >
+                    Load more
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -370,7 +503,7 @@ function App() {
                       <div className="log-col log-col-ts">Time</div>
                       <div className="log-col log-col-level">Level</div>
                       <div className="log-col log-col-topic">Topic</div>
-                      <div className="log-col log-col-host">Host / Service</div>
+                      <div className="log-col log-col-host">Service</div>
                       <div className="log-col log-col-type">Type</div>
                       <div className="log-col log-col-summary">Summary</div>
                     </div>
@@ -398,7 +531,7 @@ function App() {
                           {l.topic}
                         </div>
                         <div className="log-col log-col-host">
-                          {l.host}/{l.service}
+                          {l.service}
                         </div>
                         <div className="log-col log-col-type">
                           {l.type}

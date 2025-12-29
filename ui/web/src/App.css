@@ -8,6 +8,10 @@
   --log-bg: #111;
 }
 
+#root {
+  width: 100%;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -53,6 +57,7 @@ header .status.error {
 main {
   flex: 1;
   display: flex;
+  width: 100%;
   min-height: 0;
   min-width: 0;
 }
@@ -194,7 +199,7 @@ button:hover {
   overflow-y: auto;
   overflow-x: hidden;
   white-space: normal; /* table layout, not pre-wrap */
-  min-width: 0;
+  min-width: 100%;
 }
 
 .log-table {

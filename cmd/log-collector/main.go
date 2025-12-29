@@ -14,12 +14,14 @@ package main
 *******************************************************************************/
 
 import (
+	"database/sql"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -203,7 +205,8 @@ func (h *hub) serveWS(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
-func startHTTPServer(httpAddr string, buffers *memory.TopicBuffers, h *hub) {
+func startHTTPServer(httpAddr string, buffers *memory.TopicBuffers, h *hub,
+	                 db *sql.DB) {
 	mux := http.NewServeMux()
 
 	// GET /api/topics
@@ -254,6 +257,153 @@ func startHTTPServer(httpAddr string, buffers *memory.TopicBuffers, h *hub) {
 	// WebSocket endpoint for live logs
 	mux.HandleFunc("/ws/logs", func(w http.ResponseWriter, r *http.Request) {
 		h.serveWS(w, r)
+	})
+
+	// HTTP serves log queries on /api/logs
+	mux.HandleFunc("/api/logs", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+
+		startStr := q.Get("start")
+		endStr := q.Get("end")
+		if startStr == "" || endStr == "" {
+			http.Error(w, "missing start or end", http.StatusBadRequest)
+			return
+		}
+
+		startT, err := time.Parse(time.RFC3339Nano, startStr)
+		if err != nil {
+			startT, err = time.Parse(time.RFC3339, startStr)
+			if err != nil {
+				http.Error(w, "invalid start time", http.StatusBadRequest)
+				return
+			}
+		}
+
+		endT, err := time.Parse(time.RFC3339Nano, endStr)
+		if err != nil {
+			endT, err = time.Parse(time.RFC3339, endStr)
+			if err != nil {
+				http.Error(w, "invalid end time", http.StatusBadRequest)
+				return
+			}
+		}
+
+		startMs := startT.UnixMilli()
+		endMs := endT.UnixMilli()
+
+		// Multi-value filters via repeated query params:
+		// /api/logs?...&topic=a&topic=b&service=x&service=y
+		topics := q["topic"]
+		services := q["service"]
+		hosts := q["host"]
+		types := q["type"]
+
+		// Levels: allow repeated level=LOG_LEVEL_INFO or level=2
+		levelStrs := q["level"]
+		levels := make([]int, 0, len(levelStrs))
+		for _, s := range levelStrs {
+			if s == "" {
+				continue
+			}
+			if n, err := strconv.Atoi(s); err == nil {
+				levels = append(levels, n)
+				continue
+			}
+			if v, ok := logging.LogLevel_value[s]; ok {
+				levels = append(levels, int(v))
+			} else {
+				// Also tolerate "INFO" etc. if you want
+				key := "LOG_LEVEL_" + strings.ToUpper(s)
+				if v, ok := logging.LogLevel_value[key]; ok {
+					levels = append(levels, int(v))
+				}
+			}
+		}
+
+		limit := 500
+		if s := q.Get("limit"); s != "" {
+			if v, err := strconv.Atoi(s); err == nil && v > 0 {
+				limit = v
+			}
+		}
+		if limit > 5000 {
+			limit = 5000
+		}
+
+		// cursor = "eventTsMs:id"
+		var cursorTS, cursorID int64
+		if c := q.Get("cursor"); c != "" {
+			parts := strings.SplitN(c, ":", 2)
+			if len(parts) == 2 {
+				if ts, err := strconv.ParseInt(parts[0], 10, 64); err == nil {
+					if id, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+						cursorTS, cursorID = ts, id
+					}
+				}
+			}
+		}
+
+		rows, err := storage.QueryLogsMulti(
+			db,
+			startMs, endMs,
+			topics,
+			services,
+			hosts,
+			levels,
+			types,
+			cursorTS, cursorID,
+			limit,
+		)
+		if err != nil {
+			http.Error(w, "query failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		out := make([]wsLogMessage, 0, len(rows))
+		for _, r := range rows {
+			dto := logDTO{
+				Topic:   r.Topic,
+				Level:   logging.LogLevel(r.Level).String(),
+				Service: "",
+				Host:    "",
+				Summary: "",
+				Type:    "",
+			}
+
+			dto.Timestamp = time.UnixMilli(r.EventTSMs).UTC().Format(time.RFC3339Nano)
+			if r.Service.Valid { dto.Service = r.Service.String }
+			if r.Host.Valid { dto.Host = r.Host.String }
+			if r.Summary.Valid { dto.Summary = r.Summary.String }
+			if r.Type.Valid { dto.Type = r.Type.String }
+
+			var payload json.RawMessage
+			if h.registry != nil && len(r.Payload) > 0 && dto.Type != "" {
+				if b, err := h.registry.FormatJSON(dto.Type, r.Payload); err == nil {
+					payload = json.RawMessage(b)
+				} else {
+					log.Printf("history payload decode failed for type %q: %v", dto.Type, err)
+				}
+			}
+
+			out = append(out, wsLogMessage{
+				logDTO:      dto,
+				PayloadJSON: payload,
+			})
+		}
+
+		nextCursor := ""
+		if len(rows) == limit {
+			last := rows[len(rows)-1]
+			nextCursor = fmt.Sprintf("%d:%d", last.EventTSMs, last.ID)
+		}
+
+		resp := map[string]any{
+			"items":       out,
+			"next_cursor": nextCursor,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 
 	// Static files (GUI) from ./ui/static
@@ -308,18 +458,18 @@ func main() {
 	h := newHub(topicBuffers, reg)
 	go h.run()
 
-	// HTTP server (REST + static GUI + WebSockets)
-	startHTTPServer(*httpAddr, topicBuffers, h)
-
-	writer, err := storage.NewWriter(*dataDir)
+	db, err := storage.OpenSQLite("protolog/data/protolog.db")
 	if err != nil {
 		log.Fatalf("failed to init storage: %v", err)
 	}
-	defer func() {
-		if err := writer.Close(); err != nil {
-			log.Printf("error closing storage: %v", err)
-		}
-	}()
+	defer func() { _ = db.Close() }()
+
+	if err := storage.InitSchema(db); err != nil {
+		log.Fatal(err)
+	}
+
+	// HTTP server (REST + static GUI + WebSockets)
+	startHTTPServer(*httpAddr, topicBuffers, h, db)
 
 	sub, err := zmq4.NewSocket(zmq4.SUB)
 	if err != nil {
@@ -350,8 +500,8 @@ func main() {
 			continue
 		}
 
-		if err := writer.WriteEnvelope(&env); err != nil {
-			log.Printf("failed to write envelope to storage: %v", err)
+		if err := storage.InsertLog(db, &env); err != nil {
+			log.Printf("Failed to insert log: %v", err)
 		}
 
 		// Store in in-memory ring buffer for quick recent-access
